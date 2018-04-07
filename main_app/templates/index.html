@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% load staticfiles %}
+
+
+{% block content %}
+
+    {% for cat in cats %}
+      <a href="/{{cat.id}}">
+        <p>Name: {{ cat.name }}</p>
+      </a>
+      <a href="/user/{{cat.user.username}}">
+        <p>Adopted By: {{cat.user.username }}</p>
+      </a>
+      {% if cat.age > 0 %}
+        <p>Age: {{ cat.age }}</p>
+      {% else %}
+        <p>Age: Kitten</p>
+      {% endif %}
+
+      <a class="waves-effect waves-light btn like" data-id="{{cat.id}}">
+        Likes: {% if cat.likes > 0 %} {{ cat.likes }} {% else %} None :( {% endif %}
+      </a>
+
+    	<hr />
+
+    {% endfor %}
+
+    <p>Add a new Cat:</p>
+    <form action="post_url/" method="post">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <input type="submit" value="Submit" />
+    </form>
+
+{% endblock %}
