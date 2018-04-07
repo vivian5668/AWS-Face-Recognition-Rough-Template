@@ -21,7 +21,6 @@ class LoginForm(forms.Form):
     username = forms.CharField(label="User Name", max_length=64)
     password = forms.CharField(widget=forms.PasswordInput())
 
-
 # see extra codealong
 class SignUpForm(UserCreationForm):
     first_name = forms.CharField(max_length=30, required=False,)
@@ -32,7 +31,9 @@ class SignUpForm(UserCreationForm):
         model = User
         fields = ('username', 'first_name', 'last_name', 'email', 'password1', 'password2', )
 
-
+class UploadPicture(forms.Form):
+    image = forms.FileField(required=True)
+    
 
 
 # before we started using our model we defined our form manually here

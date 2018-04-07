@@ -20,3 +20,15 @@ class Toy(models.Model):
 
 	def __str__(self):
 		return self.name
+
+class Picture(models.Model):
+    name = models.CharField(max_length=100)
+    mood = models.CharField(max_length=50)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+
+
+
+
+
+

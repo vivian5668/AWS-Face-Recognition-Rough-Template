@@ -1,21 +1,41 @@
+"""
+The :mod: `views` is to give all possible routable actions
+for all pages
+"""
+
+# Author: Chelsea
+# License: MIT License
+
+import boto3
+import base64
+import uuid
+import warnings
+import requests
+import logging
+
+
+from io import BytesIO
 from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import render, get_object_or_404, redirect
-from .forms import CatForm, LoginForm, SignUpForm, ToyForm
 from django.contrib.auth.models import User
-from django.contrib.auth import authenticate, login, logout, authenticate # we add redirect with auth
-import requests
+# we add redirect with auth
+from django.contrib.auth import authenticate, login, logout, authenticate
+
+from .forms import CatForm, LoginForm, SignUpForm, ToyForm, UploadPicture
+
 
 # Create your views here.
 
-from .models import Cat, Toy
+from .models import Cat, Toy, Picture
 
+BUCKET_NAME = 'chelsea-motion-detector'
+S3_BUCKET = 's3://{}/'.format(BUCKET_NAME)
 
 def index(request):
-	# context = {'cats': cats}
-	cats = Cat.objects.all()
-	form = CatForm()
-	return render(request, 'index.html', {'cats': cats, 'form': form})
-
+    # context = {'cats': cats}
+    cats = Cat.objects.all()
+    form = CatForm()
+    return render(request, 'index.html', {'cats': cats, 'form': form})
 
 
 def show(request, cat_id):
@@ -26,20 +46,18 @@ def show(request, cat_id):
 
 # now that our model dictates our form we can write less code in our post route
 def post_cat(request):
-	form = CatForm(request.POST)
-	if form.is_valid:
-		cat = form.save(commit = False)
-	cat.user = request.user
-	cat.save()
-	return HttpResponseRedirect('/')
-
+    form = CatForm(request.POST)
+    if form.is_valid:
+        cat = form.save(commit=False)
+    cat.user = request.user
+    cat.save()
+    return HttpResponseRedirect('/')
 
 
 def profile(request, username):
     user = User.objects.get(username=username)
     cats = Cat.objects.filter(user=user)
     return render(request, 'profile.html', {'username': username, 'cats': cats})
-
 
 
 def signup(request):
@@ -57,7 +75,6 @@ def signup(request):
     return render(request, 'signup.html', {'form': form})
 
 
-
 def login_view(request):
     if request.method == 'POST':
         # if post, then authenticate (user submitted username and password)
@@ -65,7 +82,7 @@ def login_view(request):
         if form.is_valid():
             u = form.cleaned_data['username']
             p = form.cleaned_data['password']
-            user = authenticate(username = u, password = p)
+            user = authenticate(username=u, password=p)
             if user is not None:
                 if user. is_active:
                     login(request, user)
@@ -77,7 +94,6 @@ def login_view(request):
     else:
         form = LoginForm()
         return render(request, 'login.html', {'form': form})
-
 
 
 def logout_view(request):
@@ -96,42 +112,48 @@ def like_cat(request):
             cat.save()
     return HttpResponse(likes)
 
+
 def edit_cat(request, cat_id):
     instance = get_object_or_404(Cat, id=cat_id)
     form = CatForm(request.POST or None, instance=instance)
     if form.is_valid():
         form.save()
         return redirect('show', cat_id)
-    return render(request, 'edit_cat.html', {'cat':instance, 'form': form})
+    return render(request, 'edit_cat.html', {'cat': instance, 'form': form})
 
 # django doesn't have a built-in method for delete
-#pk = primary key
+# pk = primary key
+
+
 def delete_cat(request, cat_id):
     if request.method == 'POST':
         instance = Cat.objects.get(pk=cat_id)
         instance.delete()
         return redirect('index')
 
+
 def create_toy(request, cat_id):
     form = ToyForm(request.POST)
     if form.is_valid():
-        try: 
+        try:
             toy = Toy.objects.get(name=form.data.get('name'))
         except:
             toy = None
         if toy is None:
             toy = form.save()
-    #this is basically a find-or-create
+    # this is basically a find-or-create
         cat = Cat.objects.get(pk=cat_id)
         toy.cats.add(cat)
         return redirect('show_toy', toy.id)
-    else: 
+    else:
         return redirect('show', cat_id)
+
 
 def show_toy(request, toy_id):
     toy = Toy.objects.get(pk=toy_id)
     cats = toy.cats.all()
     return render(request, 'show_toy.html', {'toy': toy, 'cats': cats})
+
 
 def api(request):
     payload = {'key': 'Mjk0MTkz'}
@@ -139,14 +161,90 @@ def api(request):
     return render(request, 'api.html', {'imageurl': res.url})
 
 
+def read_file_as_byte64(client, s3_location):
+    """
+    Read s3location (s3://xxxx) as images which can be 
+    shown on web
+
+    Args:
+        client (boto3.client): The s3 client
+        s3_location (str): "s3://xxx"-like s3 location
+
+    Returns:
+        str: The byte64 string for images
+
+    References: 
+        https://stackoverflow.com/questions/20756042/javascript-how-to-display-image-from-byte-array-using-javascript-or-servlet
+
+    """
+    s3_loc_split = s3_location.split("/")
+    bucket = s3_loc_split[2]
+    s3_file = '/'.join(s3_loc_split[3:])
+    return "data:image/png;base64," + base64.encodestring(
+        client.get_object(Bucket=bucket, Key=s3_file)['Body'].read()
+    ).decode("utf-8")
 
 
+def motion_result(request):
+    # using UploadPicture Form, see line 192
+    form = UploadPicture()
+
+    if request.method == 'POST':
+        # read the uploaded image
+        image_bytes = request.FILES['image'].read()
+        # build a connection to s3, permission needed, it will read envirn variables
+        s3_client = boto3.client('s3')
+
+        username = request.user.get_username()
+        identify_key = uuid.uuid4()
+        s3_key = "{}/{}".format(username, identify_key)
+        # uploading file to bucket 'chelsea-motion-dectector'
+        try:
+            s3_client.upload_fileobj(
+                BytesIO(image_bytes),
+                BUCKET_NAME,
+                s3_key)
+
+            rekognition_client = boto3.client('rekognition')
+            rekoginition_response = rekognition_client.detect_faces(
+                Image={'Bytes': image_bytes},
+                Attributes=['ALL']
+            )
+            # Find out the max matching mood from api
+            mood = max(rekoginition_response['FaceDetails'][0]['Emotions'],
+                       key=lambda x: x['Confidence'])['Type']
+
+            new_image_record = Picture.objects.create(
+                user=request.user,
+                mood=str(mood),
+                name= S3_BUCKET + s3_key
+            )
+            new_image_record.save()
+            img_bytes_string = base64.encodestring(
+                image_bytes).decode(
+                "utf-8")
+            return render(request, 'motion_result.html',
+                      {'result': str(mood), 'form': form,
+                       'img': "data:image/png;base64," + img_bytes_string})
+        except:
+            warnings.warn("Perssion is not granted")
+
+        
+    # if this is a get request, show the picture upload form
+    return render(request, 'motion_result.html',
+                  {'result': "Unknown", 'form': form, 'img': ""})
 
 
+def history(request):
+    picture_records = Picture.objects.filter(user=request.user)
+    image_array = []
+    s3_client = boto3.client('s3')
 
+    for picture_object in picture_records:
+        image_array.append({
+            "mood": picture_object.mood,
+            "timestamp": picture_object.timestamp,
+            "img": read_file_as_byte64(s3_client, picture_object.name)
+        })
 
-
-
-
-
-
+    return render(request, 'history.html', {'pictures': image_array})
