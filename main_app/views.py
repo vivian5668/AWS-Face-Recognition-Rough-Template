@@ -196,6 +196,8 @@ def motion_result(request):
         s3_client = boto3.client('s3')
 
         username = request.user.get_username()
+
+        #UUID4() generates a unique ID with higher security than UUID1()
         identify_key = uuid.uuid4()
         s3_key = "{}/{}".format(username, identify_key)
         # uploading file to bucket 'chelsea-motion-dectector'
@@ -212,8 +214,9 @@ def motion_result(request):
             )
             # Find out the max matching mood from api
             mood = max(rekoginition_response['FaceDetails'][0]['Emotions'],
-                       key=lambda x: x['Confidence'])['Type']
+                key=lambda x: x['Confidence'])['Type']
 
+            #save the info about this picture to DB
             new_image_record = Picture.objects.create(
                 user=request.user,
                 mood=str(mood),
@@ -236,8 +239,10 @@ def motion_result(request):
 
 
 def history(request):
+    #find all picture records of one user
     picture_records = Picture.objects.filter(user=request.user)
     image_array = []
+    #establish client with AWS
     s3_client = boto3.client('s3')
 
     for picture_object in picture_records:
